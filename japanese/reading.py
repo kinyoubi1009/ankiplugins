@@ -18,71 +18,72 @@ furiganaFieldSuffix = u" (furigana)"
 kakasiArgs = ["-isjis", "-osjis", "-u", "-JH", "-KH"]
 mecabArgs = ['--node-format=%m[%f[7]] ', '--eos-format=\n',
             '--unk-format=%m[] ']
-
-def findAdditions(base_sentence, new_sentence, startchar, endchar):
-	base_position = 0
-	new_position = 0
+def findAdditions(base_sentence, additions_sentence, startchar, endchar):
+	base_pointer = 0
+	add_pointer = 0
 	difference_array=[]
-	while new_position < len(new_sentence) and base_position < len(base_sentence):
-		if new_sentence[new_position] == base_sentence[base_position]:
-			new_position+=1
-			base_position+=1
-		elif new_sentence[new_position] == " ":
+	# scan through both sentences until a difference is reached. 
+	# add the point in the base sentence where the difference is, and the added text to a difference array
+	while add_pointer < len(additions_sentence) and base_pointer < len(base_sentence):
+		if additions_sentence[add_pointer] == base_sentence[base_pointer]:
+			add_pointer+=1
+			base_pointer+=1
+		elif additions_sentence[add_pointer] == " ":
 			# furigana needs to preserve spaces before kanji to ensure correct formatting
 			if startchar == "[":
-				difference_array.append([base_position,new_position,new_position+1])
-			new_position+=1
-		elif base_sentence[base_position] == " ":
-			base_position+=1
-		elif new_sentence[new_position] == startchar:
-			change_start = new_position
-			while not new_sentence[new_position] == endchar:
-				new_position+=1
-			new_position+=1
-			difference_array.append([base_position, change_start, new_position])
-	if new_position < len(new_sentence):
-		difference_array.append([base_position, new_position, len(new_sentence)])
+				difference_array.append([base_pointer, " "])
+			add_pointer+=1
+		elif base_sentence[base_pointer] == " ":
+			base_pointer+=1
+		elif additions_sentence[add_pointer] == startchar:
+			change_start = add_pointer
+			while not additions_sentence[add_pointer] == endchar:
+				add_pointer+=1
+			add_pointer+=1
+			difference_array.append([base_pointer, additions_sentence[change_start:add_pointer]])
+	if add_pointer < len(additions_sentence):
+		difference_array.append([base_pointer,additions_sentence[add_pointer:len(additions_sentence)]])
 	return difference_array
 
+def combineDiffArrays(diffHTML, diffFurigana):
+	combined_diff_array = []
+	# while there are elements in either diffHTML or diffFurigana, pop the further difference into a new array,
+	# thus sorting it backwards, then reverse at the end.
+	while (diffHTML or diffFurigana):
+		if diffHTML and diffFurigana:
+			if diffHTML[-1][0] >= diffFurigana[-1][0]:
+				combined_diff_array.append(diffHTML.pop())
+			else:
+				combined_diff_array.append(diffFurigana.pop())
+		elif diffHTML:
+			combined_diff_array.append(diffHTML.pop())
+		else:
+			combined_diff_array.append(diffFurigana.pop())
+	combined_diff_array.reverse()
+	return combined_diff_array
+
 def mergeHTMLFurigana(HTML_string, furigana_string):
-	base_pos=0
-	furigana_diff_pos=0
-	format_diff_pos=0
+	base_pointer=0
 	output_sentence=''
 	base_sentence = escapeText(HTML_string)
 	HTML_string = entsToTxt(HTML_string)
-	base_sentence = re.sub('<br ?/?>','---newline---',base_sentence)
-	furigana_sentence = re.sub('<br ?/?>','---newline---',furigana_string)
-	format_sentence = re.sub('<br ?/?>','---newline---',HTML_string)
+	(base_sentence, furigana_sentence, format_sentence) = (re.sub('<br ?/?>','---newline---',x) for x in (base_sentence, furigana_string, HTML_string))
+	# create an array of differences from the base sentence
+	# format is [[1, "this part is changed"],[10, "this too"]]
+	#             ^ position is base_sentence where difference starts
+	# the only additions in the furigana string are in between []
 	furigana_diff_array=findAdditions(base_sentence,furigana_sentence,"[","]")
+	# the only additions in the format string are between <>
 	format_diff_array=findAdditions(base_sentence,format_sentence,"<",">")
-	while furigana_diff_pos < len(furigana_diff_array) and format_diff_pos < len(format_diff_array):
-		if furigana_diff_array[furigana_diff_pos][0] <= format_diff_array[format_diff_pos][0]:
-			if base_pos <= furigana_diff_array[furigana_diff_pos][0]:
-				output_sentence+=base_sentence[base_pos:furigana_diff_array[furigana_diff_pos][0]]
-				base_pos = furigana_diff_array[furigana_diff_pos][0]
-			output_sentence+=furigana_sentence[furigana_diff_array[furigana_diff_pos][1]:furigana_diff_array[furigana_diff_pos][2]]
-			furigana_diff_pos+=1
-		elif format_diff_array[format_diff_pos][0] < furigana_diff_array[furigana_diff_pos][0]:
-			if base_pos < format_diff_array[format_diff_pos][0]:
-				output_sentence+=base_sentence[base_pos:format_diff_array[format_diff_pos][0]]
-				base_pos = format_diff_array[format_diff_pos][0]
-			output_sentence+=format_sentence[format_diff_array[format_diff_pos][1]:format_diff_array[format_diff_pos][2]]
-			format_diff_pos+=1
-	while furigana_diff_pos < len(furigana_diff_array):
-		if base_pos < furigana_diff_array[furigana_diff_pos][0]:
-			output_sentence+=base_sentence[base_pos:furigana_diff_array[furigana_diff_pos][0]]
-			base_pos = furigana_diff_array[furigana_diff_pos][0]
-		output_sentence+=furigana_sentence[furigana_diff_array[furigana_diff_pos][1]:furigana_diff_array[furigana_diff_pos][2]]
-		furigana_diff_pos+=1
-	while format_diff_pos < len(format_diff_array):
-		if base_pos < format_diff_array[format_diff_pos][0]:
-			output_sentence+=base_sentence[base_pos:format_diff_array[format_diff_pos][0]]
-			base_pos = format_diff_array[format_diff_pos][0]
-		output_sentence+=format_sentence[format_diff_array[format_diff_pos][1]:format_diff_array[format_diff_pos][2]]
-		format_diff_pos+=1
-	if base_pos < len(base_sentence):
-		output_sentence+=base_sentence[base_pos:len(base_sentence)]
+	difference_array = combineDiffArrays(format_diff_array, furigana_diff_array)
+	# combine all the additions from furigana and format sentences into the base sentence and put into output sentence
+	for difference in difference_array:
+		if base_pointer < difference[0]:
+			output_sentence += base_sentence[base_pointer:difference[0]]
+			base_pointer = difference[0]
+		output_sentence += difference[1]
+	if base_pointer < len(base_sentence):
+		output_sentence+=base_sentence[base_pointer:len(base_sentence)]
 	output_sentence = re.sub('---newline---','<br>',output_sentence)
 	return output_sentence
 
